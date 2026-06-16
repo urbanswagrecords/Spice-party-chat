@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>SPICE Voice</title>
+</head>
+<body>
+  <h1>SPICE Voice Test</h1>
+  <button id="join">Join Voice</button>
+  <script type="module">
+    import { createClient } from "https://esm.sh/@supabase/supabase-js";
+    import SimplePeer from "https://esm.sh/simple-peer";
+
+    const supabaseUrl = "https://smfwerquoqxmuqijbqw.supabase.co";
+    const supabaseKey = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNtZndlcnF1b3F4bXVqcWpqYnF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEyMzE5MDQsImV4cCI6MjA5NjgwNzkwNH0.tcu6cT5uPd76f_IUwGYiN-jlvZCUTgJ1pbRgQ-onHng
+
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    const ROOM_ID = "00000000-0000-0000-0000-000000000001"; // temp test room
+
+    let peer;
+
+    document.getElementById("join").onclick = async () => {
+      // anonymous login
+      await supabase.auth.signInAnonymously();
+
+      // make sure room exists
+      await supabase.from("voice_rooms").upsert({ id: ROOM_ID, name: "Test Room" });
+
+      // create WebRTC peer
+      peer = new SimplePeer({ initiator: true, trickle: false });
+
+      // send offer to Supabase
+      peer.on("signal", async data => {
+        await supabase.from("voice_peers").insert({
+          room_id: ROOM_ID,
+          signal: data
+        });
+      });
+
+      // listen for other peers’ signals
+      supabase
+        .channel("voice_signals")
+        .on(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "voice_peers", filter: `room_id=eq.${ROOM_ID}` },
+          payload => {
+            const sig = payload.new.signal;
+            if (sig) peer.signal(sig);
+          }
+        )
+        .subscribe();
+
+      // play incoming audio
+      peer.on("stream", stream => {
+        const audio = document.createElement("audio");
+        audio.srcObject = stream;
+        audio.autoplay = true;
+        document.body.appendChild(audio);
+      });
+
+      // send mic audio
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      peer.addStream(stream);
+    };
+  </script>
+</body>
+</html>
